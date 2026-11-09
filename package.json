@@ -1,0 +1,64 @@
+{
+  "name": "dsh-session-grep",
+  "version": "1.0.1",
+  "description": "Substring search across every conversation in a workspace, Chinese included: the built-in tokenizer only matches whole tokens, this matches any fragment. · 在对话正文里做真正的子串搜索（中文片段也能命中）。",
+  "type": "module",
+  "license": "MIT",
+  "author": "chenshanhan0711",
+  "main": "index.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/chenshanhan0711/dsh-session-grep.git"
+  },
+  "homepage": "https://github.com/chenshanhan0711/dsh-session-grep#readme",
+  "bugs": {
+    "url": "https://github.com/chenshanhan0711/dsh-session-grep/issues"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "keywords": [
+    "deepseek",
+    "harness",
+    "dsh",
+    "dsh-plugin",
+    "search",
+    "session",
+    "conversation",
+    "grep"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "README.zh.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ]
+    }
+  }
+}

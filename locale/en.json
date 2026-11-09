@@ -1,0 +1,21 @@
+{
+  "meta": {
+    "title": "Conversation grep",
+    "description": "Substring search across every message in this workspace, Chinese fragments included."
+  },
+  "search": "Search",
+  "placeholder": "Search all messages, e.g. 搜索输出",
+  "hint": "Matches any fragment, including inside a Chinese sentence.",
+  "empty": "No message contains that fragment.",
+  "failed": "Search failed",
+  "tools": "Tool output",
+  "hits": "hits",
+  "ms": "ms",
+  "truncated": "stopped at limit",
+  "noHistory": "No conversation history found in this workspace.",
+  "notLocated": "Opened, but the text is not rendered yet — scroll up in that conversation.",
+  "loading": "Searching…",
+  "user": "you",
+  "assistant": "assistant",
+  "tool": "tool"
+}
