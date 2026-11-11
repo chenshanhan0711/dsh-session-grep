@@ -25,9 +25,10 @@ import zlib from 'node:zlib';
 
 export const inject = ['webServer'];
 
-const VERSION = '1.0.1';
+const VERSION = '1.0.2';
 const API = '/dsh-session-grep/api';
 const SESSION_FILE = 'session.v4.jsonl.zstd';
+const DIAG_FILE = path.join(os.tmpdir(), 'dsh-session-grep-diag.log');
 const MAGIC = Buffer.from([0x28, 0xb5, 0x2f, 0xfd]); // zstd frame magic
 const MAX_HITS_PER_DOC = 3;
 const MAX_LIMIT = 200;
@@ -244,6 +245,10 @@ function search(query, options) {
     scannedSessions++;
     const local = [];
     const seen = new Set();
+    // Occurrences of the needle in events BEFORE the current one, in event
+    // order: the client uses it to flash the exact occurrence a row stands
+    // for, instead of always the first one in the transcript.
+    let ordinalBase = 0;
     for (const ev of s.events) {
       const text = textOf(ev, tools);
       if (!text) continue;
@@ -259,6 +264,10 @@ function search(query, options) {
       let count = 1;
       for (let probe = low.indexOf(needle, at + needle.length); probe !== -1; probe = low.indexOf(needle, probe + needle.length)) {
         count += 1;
+      }
+      let beforeInEvent = 0;
+      for (let probe = low.indexOf(needle); probe !== -1 && probe < at; probe = low.indexOf(needle, probe + needle.length)) {
+        beforeInEvent += 1;
       }
       const built = snippetOf(text, at, needle.length, context);
       local.push({
@@ -276,7 +285,9 @@ function search(query, options) {
         truncatedBefore: built.before,
         truncatedAfter: built.after,
         count,
+        ordinal: ordinalBase + beforeInEvent,
       });
+      ordinalBase += count;
       if (local.length >= perSessionCap) {
         overflow = true;
         break;
@@ -405,9 +416,45 @@ export function apply(ctx) {
     },
   });
 
+  const disposeDiag = ctx.webServer.register({
+    kind: 'exact',
+    path: `${API}/diag`,
+    handler: (req, res) => {
+      if (req.method === 'GET') {
+        let lines = [];
+        try {
+          lines = fs.readFileSync(DIAG_FILE, 'utf8').split('\n').filter(Boolean).slice(-80);
+        } catch {
+          // no diagnostics yet
+        }
+        return sendJson(res, 200, { file: DIAG_FILE, lines });
+      }
+      if (req.method !== 'POST') {
+        res.writeHead(405, { allow: 'GET, POST' });
+        return res.end();
+      }
+      let body = '';
+      req.on('data', (chunk) => {
+        if (body.length < 8000) body += chunk;
+      });
+      req.on('end', () => {
+        try {
+          fs.appendFileSync(
+            DIAG_FILE,
+            `${JSON.stringify({ at: new Date().toISOString(), body: body.slice(0, 4000) })}\n`,
+          );
+        } catch {
+          // diagnostics are best-effort
+        }
+        sendJson(res, 200, { ok: true });
+      });
+    },
+  });
+
   return () => {
     disposeSearch();
     disposeSessions();
     disposeHealth();
+    disposeDiag();
   };
 }

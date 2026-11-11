@@ -1,6 +1,6 @@
 {
   "name": "dsh-session-grep",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Substring search across every conversation in a workspace, Chinese included: the built-in tokenizer only matches whole tokens, this matches any fragment. · 在对话正文里做真正的子串搜索（中文片段也能命中）。",
   "type": "module",
   "license": "MIT",

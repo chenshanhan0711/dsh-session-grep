@@ -1,5 +1,12 @@
 # Changelog
 
+## 1.0.2 — 2026-11-11
+
+- Fixed: every row in one long conversation landed on the first occurrence of the needle. The transcript mounts only a window of turns, so counting occurrences in the DOM could never reach the real one.
+- Added: the client calls loadThrough(seq) on the session face before locating, so the exact event is mounted first; the fallbacks are "page up until the history stops growing", ordinal counting, and finally matching the words around the hit.
+- Fixed: locating was scoped to the whole document and could highlight the same word inside another, hidden session. It now stays inside the clicked session's own subtree.
+- Added: opt-in diagnostics — localStorage.setItem('dsg:diag', '1') records the locate pipeline to %TEMP%\\dsh-session-grep-diag.log; silent by default.
+
 ## 1.0.1 — 2026-11-09
 
 - Fixed: cross-session results were unreachable. Search stopped as soon as the row limit was reached, so the longest conversation (scanned first) filled the whole list. Hits are now collected per session and merged round-robin by newest match.

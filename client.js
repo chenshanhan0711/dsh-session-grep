@@ -140,24 +140,62 @@ mark.dsg-flash{background:var(--dsw-alias-brand-primary);color:#fff;border-radiu
       }
     }
 
-    /** Wrap the first visible occurrence of `target` in a flashing mark. */
-    function flashText(target) {
+    function isVisible(el) {
+      if (!el) return false;
+      if (el.closest('[hidden], [inert], [aria-hidden="true"]')) return false;
+      if (typeof el.checkVisibility === 'function') {
+        return el.checkVisibility({ opacityProperty: true, visibilityProperty: true });
+      }
+      return el.getClientRects().length > 0;
+    }
+
+    /** The mounted transcript for one session (never another one's). */
+    function sessionRoot(sessionId) {
+      const all = Array.from(document.querySelectorAll('[data-conversation-session]'));
+      if (!all.length) return null;
+      const id = String(sessionId || '');
+      if (id) {
+        const exact = all.find((el) => el.getAttribute('data-conversation-session') === id);
+        if (exact) return exact;
+        const byPrefix = all.find((el) => id.startsWith(el.getAttribute('data-conversation-session') || 'no'));
+        if (byPrefix) return byPrefix;
+      }
+      return null;
+    }
+
+    /** Wrap the `ordinal`-th (0-based) visible occurrence of `target` in a flashing mark. */
+    function flashText(root, target, ordinal) {
       const needle = String(target || '').trim();
-      if (needle.length < 2 || typeof document === 'undefined') return false;
+      const want = Math.max(0, Number(ordinal) || 0);
+      if (!root || needle.length < 2) return false;
       const lowered = needle.toLowerCase();
-      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, {
         acceptNode(node) {
           const parent = node.parentElement;
           if (!parent) return NodeFilter.FILTER_REJECT;
           if (parent.closest('.dsg-root') || parent.closest('mark.dsg-flash')) return NodeFilter.FILTER_REJECT;
           if (/^(SCRIPT|STYLE|TEXTAREA|INPUT|NOSCRIPT)$/.test(parent.tagName)) return NodeFilter.FILTER_REJECT;
+          if (!isVisible(parent)) return NodeFilter.FILTER_REJECT;
           return (node.nodeValue || '').length >= needle.length ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
         },
       });
+      let seen = 0;
       let node = walker.nextNode();
       while (node) {
-        const text = node.nodeValue;
-        const at = text.toLowerCase().indexOf(lowered);
+        const text = node.nodeValue || '';
+        const lowText = text.toLowerCase();
+        let from = 0;
+        let at = -1;
+        for (;;) {
+          const probe = lowText.indexOf(lowered, from);
+          if (probe === -1) break;
+          if (seen === want) {
+            at = probe;
+            break;
+          }
+          seen += 1;
+          from = probe + lowered.length;
+        }
         if (at !== -1) {
           try {
             const range = document.createRange();
@@ -178,17 +216,221 @@ mark.dsg-flash{background:var(--dsw-alias-brand-primary);color:#fff;border-radiu
       return false;
     }
 
-    function locateAfterOpen(target) {
-      let tries = 0;
-      const timer = setInterval(() => {
-        tries += 1;
-        if (flashText(target)) {
-          clearInterval(timer);
-        } else if (tries >= 30) {
-          clearInterval(timer);
-          runtime.notify?.();
+    /** Best-effort breadcrumb to the host; never throws, never blocks. */
+    /**
+     * Opt-in breadcrumbs (`localStorage.setItem('dsg:diag', '1')`): silent by
+     * default so the plugin never talks to the host unless asked to.
+     */
+    const DIAG_ON = (() => {
+      try {
+        return window.localStorage.getItem('dsg:diag') === '1';
+      } catch {
+        return false;
+      }
+    })();
+
+    function diag(step, extra) {
+      if (!DIAG_ON) return;
+      try {
+        fetch('/dsh-session-grep/api/diag', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ step, ...(extra || {}) }),
+        }).catch(() => {});
+      } catch {
+        /* ignore */
+      }
+    }
+
+    /** The scroll container that owns `root`. */
+    function findScroller(root) {
+      let node = root;
+      while (node && node !== document.body) {
+        const style = window.getComputedStyle(node);
+        if (/(auto|scroll)/.test(style.overflowY) && node.scrollHeight > node.clientHeight + 40) return node;
+        node = node.parentElement;
+      }
+      let best = null;
+      for (const el of Array.from(root.querySelectorAll('div'))) {
+        if (el.clientHeight < 150) continue;
+        if (el.scrollHeight <= el.clientHeight + 200) continue;
+        const style = window.getComputedStyle(el);
+        if (!/(auto|scroll)/.test(style.overflowY)) continue;
+        if (!best || el.scrollHeight > best.scrollHeight) best = el;
+      }
+      return best;
+    }
+
+    /**
+     * Second, independent locator: pick the occurrence whose surrounding turn
+     * text still contains the words from the result snippet. Survives a drift
+     * between the indexed event order and what the transcript renders.
+     */
+    function flashByContext(root, snippet, matchStart, matchLength, needleLen) {
+      const raw = String(snippet || '');
+      const start = Math.max(0, Number(matchStart) || 0);
+      const before = raw.slice(Math.max(0, start - 18), start).replace(/\s+/g, ' ').trim();
+      const after = raw.slice(start + (Number(matchLength) || 0), start + (Number(matchLength) || 0) + 18).replace(/\s+/g, ' ').trim();
+      const target = raw.slice(start, start + (Number(matchLength) || needleLen)).trim();
+      if (!target || target.length < 2) return false;
+      if (before.length < 3 && after.length < 3) return false;
+
+      const needle = raw.slice(start, start + (Number(matchLength) || needleLen));
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+      const candidates = [];
+      let node = walker.nextNode();
+      while (node) {
+        const parent = node.parentElement;
+        if (parent && !parent.closest('.dsg-root') && isVisible(parent)) {
+          const text = node.nodeValue || '';
+          const at = text.toLowerCase().indexOf(needle.toLowerCase());
+          if (at !== -1) candidates.push({ node, at });
         }
+        node = walker.nextNode();
+      }
+      for (const candidate of candidates) {
+        const row = candidate.node.parentElement?.closest('[data-chat-turn]') || candidate.node.parentElement;
+        const rowText = (row?.textContent || '').replace(/\s+/g, ' ');
+        if (before.length >= 3 && !rowText.includes(before)) continue;
+        if (after.length >= 3 && !rowText.includes(after)) continue;
+        try {
+          const range = document.createRange();
+          range.setStart(candidate.node, candidate.at);
+          range.setEnd(candidate.node, candidate.at + needle.length);
+          const mark = document.createElement('mark');
+          mark.className = 'dsg-flash';
+          range.surroundContents(mark);
+          mark.scrollIntoView({ block: 'center', behavior: 'smooth' });
+          setTimeout(clearFlash, 2600);
+          return true;
+        } catch {
+          // keep looking
+        }
+      }
+      return false;
+    }
+
+    /**
+     * Find `target` inside `wanted`'s transcript only.
+     *
+     * The transcript is paged: older turns mount only after the scroller has
+     * been pulled towards the top, so the sweep first pages all the way up
+     * (watching `scrollHeight` until it stops growing) and only then counts
+     * the ordinal. Counting before the history is fully mounted would always
+     * land on the first currently-rendered occurrence.
+     */
+    function locateAfterOpen(wanted, hit) {
+      const needle = String(hit.match || hit.snippet || '').trim();
+      const ordinal = Math.max(0, Number(hit.ordinal) || 0);
+      diag('locate-start', { needle, wanted, ordinal });
+      let waited = 0;
+
+      const firstPass = setInterval(() => {
+        waited += 300;
+        const root = sessionRoot(wanted);
+        if (root && flashText(root, needle, ordinal)) {
+          clearInterval(firstPass);
+          diag('located', { phase: 'direct', waited });
+          return;
+        }
+        if (root && flashByContext(root, hit.snippet, hit.matchStart, hit.matchLength, needle.length)) {
+          clearInterval(firstPass);
+          diag('located', { phase: 'context-direct', waited });
+          return;
+        }
+        if (waited < 900) return;
+        clearInterval(firstPass);
+        pageUpThenLocate(wanted, needle, ordinal, hit);
       }, 300);
+    }
+
+    function pageUpThenLocate(wanted, needle, ordinal, hit) {
+      const root = sessionRoot(wanted);
+      const scroller = root ? findScroller(root) : null;
+      diag('sweep-start', {
+        root: !!root,
+        scroller: !!scroller,
+        height: scroller ? Math.round(scroller.scrollHeight) : null,
+        view: scroller ? Math.round(scroller.clientHeight) : null,
+      });
+      if (!root || !scroller) {
+        runtime.notify?.();
+        return;
+      }
+
+      let hops = 0;
+      let stable = 0;
+      let lastHeight = scroller.scrollHeight;
+
+      const hop = () => {
+        hops += 1;
+        scroller.scrollTop = Math.max(0, scroller.scrollTop - Math.max(320, scroller.clientHeight * 0.9));
+        setTimeout(() => {
+          const height = scroller.scrollHeight;
+          if (height > lastHeight + 10) {
+            lastHeight = height;
+            stable = 0;
+          } else {
+            stable += 1;
+          }
+          const atTop = scroller.scrollTop <= 1;
+          if (hops < 200 && !(atTop && stable >= 2)) {
+            setTimeout(hop, 150);
+            return;
+          }
+          diag('paged', {
+            hops,
+            height: Math.round(scroller.scrollHeight),
+            view: Math.round(scroller.clientHeight),
+            atTop,
+          });
+          // Everything the app is willing to mount is mounted now.
+          scroller.scrollTop = 0;
+          setTimeout(() => {
+            if (flashText(root, needle, ordinal)) {
+              diag('located', { phase: 'sweep', hops });
+              return;
+            }
+            const seen = countOccurrences(root, needle);
+            const byContext = flashByContext(root, hit.snippet, hit.matchStart, hit.matchLength, needle.length);
+            if (byContext) {
+              diag('located', { phase: 'context', hops, ordinal, rendered: seen });
+              return;
+            }
+            const fallback = flashText(root, needle, 0);
+            diag('located', {
+              phase: fallback ? 'miss-fallback' : 'miss',
+              hops,
+              ordinal,
+              rendered: seen,
+            });
+            if (!fallback) runtime.notify?.();
+          }, 260);
+        }, 220);
+      };
+      setTimeout(hop, 200);
+    }
+
+    /** How many occurrences of `needle` the mounted transcript currently holds. */
+    function countOccurrences(root, needle) {
+      const lowered = String(needle || '').toLowerCase();
+      if (!root || lowered.length < 2) return 0;
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT, null);
+      let count = 0;
+      let node = walker.nextNode();
+      while (node) {
+        const parent = node.parentElement;
+        if (parent && !parent.closest('.dsg-root') && isVisible(parent)) {
+          const text = (node.nodeValue || '').toLowerCase();
+          let at = text.indexOf(lowered);
+          while (at !== -1) {
+            count += 1;
+            at = text.indexOf(lowered, at + lowered.length);
+          }
+        }
+        node = walker.nextNode();
+      }
+      return count;
     }
 
     // ------------------------------------------------------------- component
@@ -302,19 +544,29 @@ mark.dsg-flash{background:var(--dsw-alias-brand-primary);color:#fff;border-radiu
         clearFlash();
         const wanted = String(hit.sessionId || '');
         const target = (hit.match && hit.match.length >= 2 ? hit.match : hit.snippet || '').trim();
+        const ordinal = Math.max(0, Number(hit.ordinal) || 0);
         const current = runtime.currentSession();
+        diag('choose', { wanted, current, same: current === wanted, ordinal, target: target.slice(0, 60) });
+        const jump = () => {
+          Promise.resolve(runtime.prepare ? runtime.prepare(wanted, hit.seq) : false).finally(() => {
+            if (target) locateAfterOpen(wanted, hit);
+          });
+        };
         if (current && current === wanted) {
-          if (target) locateAfterOpen(target);
+          jump();
           return;
         }
         const failure = runtime.openSession(wanted);
+        diag('openSession', { wanted, failure });
         if (failure) {
           setToast(`${t('failed')}: ${failure}`);
           return;
         }
         setTimeout(() => {
+          const now = runtime.currentSession();
+          diag('after1s', { wanted, now, same: now === wanted });
           if (runtime.currentSession() === wanted) {
-            if (target) locateAfterOpen(target);
+            jump();
             return;
           }
           // A subagent (side) Session is only addressable through its durable
@@ -325,7 +577,7 @@ mark.dsg-flash{background:var(--dsw-alias-brand-primary);color:#fff;border-radiu
               return;
             }
             setTimeout(() => {
-              if (target) locateAfterOpen(target);
+              jump();
             }, 600);
           });
         }, 1000);
@@ -493,6 +745,34 @@ mark.dsg-flash{background:var(--dsw-alias-brand-primary);color:#fff;border-radiu
             const message = error?.message || String(error);
             console.warn('[dsh-session-grep] openSession failed', message);
             return message;
+          }
+        };
+
+        // Make sure one exact event is mounted before looking for it: the
+        // transcript only keeps a window of turns in the DOM, and the session
+        // face exposes loadThrough(seq) / loadOlder() for exactly this.
+        runtime.prepare = async (sessionId, seq) => {
+          try {
+            const sessions =
+              ctx.sessions || (typeof ctx.get === 'function' ? ctx.get('sessions') : null);
+            if (!sessions || typeof sessions.retain !== 'function') return false;
+            const reference = sessions.retain(sessionId, { source: 'controllerOperation' });
+            try {
+              await reference.ready;
+              const session = reference.binding?.session;
+              if (!session) return false;
+              if (Number.isFinite(seq) && typeof session.loadThrough === 'function') {
+                await session.loadThrough(seq);
+              } else if (typeof session.loadOlder === 'function') {
+                await session.loadOlder();
+              }
+              return true;
+            } finally {
+              if (typeof reference.release === 'function') reference.release();
+            }
+          } catch (error) {
+            diag('prepare-failed', { sessionId, seq, error: String(error?.message ?? error) });
+            return false;
           }
         };
 
