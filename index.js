@@ -25,7 +25,7 @@ import zlib from 'node:zlib';
 
 export const inject = ['webServer'];
 
-const VERSION = '1.0.2';
+const VERSION = '1.0.3';
 const API = '/dsh-session-grep/api';
 const SESSION_FILE = 'session.v4.jsonl.zstd';
 const DIAG_FILE = path.join(os.tmpdir(), 'dsh-session-grep-diag.log');

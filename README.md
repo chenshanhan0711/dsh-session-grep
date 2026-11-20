@@ -38,6 +38,8 @@ dsh plugin --profile <profile> add ./dsh-session-grep
 
 Or in the app: **Plugins → Add plugin** and point it at that folder. The bundle adds one Host service and one client slot; the pill appears after a restart.
 
+Requires DeepSeek Harness `>=0.2.2-rc.1 <0.3.0` (`engines.dsh` in `package.json`). DSH refuses to load a plugin whose requirements it cannot satisfy, so a future breaking release reports an incompatibility up front instead of failing silently.
+
 Remove it the same way you removed any plugin; it never touches the DSH install directory.
 
 ## How it works

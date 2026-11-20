@@ -39,6 +39,8 @@ dsh plugin --profile <profile> add ./dsh-session-grep
 
 或在应用内 **插件 → 添加插件** 选择该目录。bundle 只加一个 Host 服务和一个客户端插槽，重启后搜索胶囊出现。
 
+要求 DeepSeek Harness `>=0.2.2-rc.1 <0.3.0`（`package.json` 里的 `engines.dsh`）。DSH 加载插件前会核对版本要求：不满足时会明确报「不兼容」，而不是等运行时才悄悄坏掉。
+
 卸载：与其他插件相同，不会改动 DSH 安装目录。
 
 ## 实现

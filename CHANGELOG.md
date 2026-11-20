@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.3 — 2026-11-21
+
+- Added: `engines.dsh` (`>=0.2.2-rc.1 <0.3.0`). Harness builds that cannot verify a plugin's requirements accept it silently; declaring the range makes DSH report an explicit incompatibility next time a breaking release lands, instead of failing quietly at runtime.
+- No functional change.
+
 ## 1.0.2 — 2026-11-11
 
 - Fixed: every row in one long conversation landed on the first occurrence of the needle. The transcript mounts only a window of turns, so counting occurrences in the DOM could never reach the real one.
