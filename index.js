@@ -25,7 +25,7 @@ import zlib from 'node:zlib';
 
 export const inject = ['webServer'];
 
-const VERSION = '1.0.3';
+const VERSION = '1.0.4';
 const API = '/dsh-session-grep/api';
 const SESSION_FILE = 'session.v4.jsonl.zstd';
 const DIAG_FILE = path.join(os.tmpdir(), 'dsh-session-grep-diag.log');
@@ -345,11 +345,33 @@ function methodNotAllowed(res) {
   res.end();
 }
 
+function warn(ctx, message) {
+  try {
+    const logger = typeof ctx.logger === 'function' ? ctx.logger('dsh-session-grep') : ctx.logger;
+    logger?.warn?.(message);
+  } catch {
+    // logging must never break activation
+  }
+}
+
+/**
+ * Mount one exact route. A reloaded entry can find the previous instance's route
+ * still bound (hot reload, or a failed activation that was never torn down); reuse
+ * that route instead of failing the whole entry.
+ */
+function mountRoute(ctx, path, handler) {
+  try {
+    return ctx.webServer.register({ kind: 'exact', path, handler });
+  } catch (error) {
+    const message = String(error?.message ?? error);
+    if (!/duplicate|already registered|conflict/i.test(message)) throw error;
+    warn(ctx, `route ${path} is already mounted; reusing it (${message})`);
+    return () => {};
+  }
+}
+
 export function apply(ctx) {
-  const disposeSearch = ctx.webServer.register({
-    kind: 'exact',
-    path: `${API}/search`,
-    handler: (req, res) => {
+  const disposeSearch = mountRoute(ctx, `${API}/search`, (req, res) => {
       if (req.method !== 'GET') return methodNotAllowed(res);
       const url = new URL(req.url ?? '/', 'http://localhost');
       const q = (url.searchParams.get('q') ?? '').trim();
@@ -368,13 +390,9 @@ export function apply(ctx) {
       } catch (error) {
         sendJson(res, 500, { error: String(error?.message ?? error) });
       }
-    },
   });
 
-  const disposeSessions = ctx.webServer.register({
-    kind: 'exact',
-    path: `${API}/sessions`,
-    handler: (req, res) => {
+  const disposeSessions = mountRoute(ctx, `${API}/sessions`, (req, res) => {
       if (req.method !== 'GET') return methodNotAllowed(res);
       try {
         const { root, sessions } = listSessions();
@@ -392,13 +410,9 @@ export function apply(ctx) {
       } catch (error) {
         sendJson(res, 500, { error: String(error?.message ?? error) });
       }
-    },
   });
 
-  const disposeHealth = ctx.webServer.register({
-    kind: 'exact',
-    path: `${API}/health`,
-    handler: (req, res) => {
+  const disposeHealth = mountRoute(ctx, `${API}/health`, (req, res) => {
       if (req.method !== 'GET') return methodNotAllowed(res);
       let sessions = 0;
       try {
@@ -413,13 +427,9 @@ export function apply(ctx) {
         sessions,
         cached: cache.size,
       });
-    },
   });
 
-  const disposeDiag = ctx.webServer.register({
-    kind: 'exact',
-    path: `${API}/diag`,
-    handler: (req, res) => {
+  const disposeDiag = mountRoute(ctx, `${API}/diag`, (req, res) => {
       if (req.method === 'GET') {
         let lines = [];
         try {
@@ -448,7 +458,6 @@ export function apply(ctx) {
         }
         sendJson(res, 200, { ok: true });
       });
-    },
   });
 
   return () => {

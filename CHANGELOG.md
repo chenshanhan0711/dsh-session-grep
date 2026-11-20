@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.4 — 2026-11-21
+
+- Fixed: a reloaded Host half could fail the whole entry with `webserver: duplicate exact route`. Route mounting now reuses a path that is still bound by the previous instance and logs it, instead of throwing away the plugin.
+- Other registration errors are still rethrown, so genuine faults stay visible.
+
 ## 1.0.3 — 2026-11-21
 
 - Added: `engines.dsh` (`>=0.2.2-rc.1 <0.3.0`). Harness builds that cannot verify a plugin's requirements accept it silently; declaring the range makes DSH report an explicit incompatibility next time a breaking release lands, instead of failing quietly at runtime.
